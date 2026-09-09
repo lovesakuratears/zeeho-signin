@@ -7,11 +7,11 @@
   "user_agent": "<YOUR_USER_AGENT>",
   "device": {
     "platform": "Android",
-    "os_version": "16",
+    "os_version": "14",
     "app_version": "3.0.4",
-    "brand": "<YOUR_BRAND>",
-    "model": "<YOUR_MODEL>",
-    "resolution": "<WIDTH*HEIGHT>",
+    "brand": "Redmi",
+    "model": "Redmi K70",
+    "resolution": "1080*2400",
     "device_uuid": "<YOUR_DEVICE_UUID>",
     "network": "4g",
     "os": "AndroidOS"
