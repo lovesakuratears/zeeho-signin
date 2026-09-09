@@ -1,0 +1,19 @@
+{
+  "app_id": "Sw5F9uJi",
+  "app_secret": "",
+  "user_id": "<YOUR_USER_ID>",
+  "authorization": "Bearer <YOUR_TOKEN>",
+  "cookie": "<YOUR_COOKIE>",
+  "user_agent": "<YOUR_USER_AGENT>",
+  "device": {
+    "platform": "Android",
+    "os_version": "16",
+    "app_version": "3.0.4",
+    "brand": "<YOUR_BRAND>",
+    "model": "<YOUR_MODEL>",
+    "resolution": "<WIDTH*HEIGHT>",
+    "device_uuid": "<YOUR_DEVICE_UUID>",
+    "network": "4g",
+    "os": "AndroidOS"
+  }
+}
