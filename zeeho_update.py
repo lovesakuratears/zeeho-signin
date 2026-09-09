@@ -26,7 +26,7 @@ import sys
 import time
 import requests
 
-REPO = "jixiaotong1999/zeeho-signin"
+REPO = "lovesakuratears/zeeho-signin"
 BRANCH = "main"
 # 默认只更新核心脚本；zeeho_data.json 含用户密钥，绝不覆盖
 FILES = ["zeeho_signin.py"]
