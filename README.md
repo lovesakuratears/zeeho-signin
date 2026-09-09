@@ -60,19 +60,16 @@
 
 ### Android（免 Root）
 
-安卓 7+ 默认不信任用户证书，需先绕过 SSL Pinning：
+用 Reqable 手机版直接抓包即可（签到是 H5 页面，无 SSL Pinning）：
 
-**方案 A：LSPatch + JustTrustMe（推荐）**
-1. 装 LSPatch APP + JustTrustMe 模块
-2. LSPatch 对极核 APP 打补丁，勾选 JustTrustMe
-3. 安装补丁版极核，再用 Reqable / Charles 抓包
+1. 应用商店装 **Reqable**（原力）手机版
+2. 打开 Reqable → 启动抓包（创建本地 VPN）
+3. 按提示安装并信任 Reqable 的 CA 证书
+4. 打开极核 APP 登录，进入签到页
+5. 回到 Reqable 里找 `h5.zeehoev.com/cfmotoservermine/` 的请求
+6. 复制请求头里的 `user_id`、`Authorization`、`Cookie`、`User-Agent`、`Zeeho-User-Agent` 填进 `zeeho_data.json`
 
-**方案 B：太极 + JustTrustMe**
-1. 装太极，把极核导入太极
-2. 太极内启用 JustTrustMe 模块
-3. 从太极启动极核，再抓包
-
-抓包流程同 iOS。
+> 如果某些 APP 抓不到（开启了 SSL Pinning），再用 LSPatch + JustTrustMe 或太极 + JustTrustMe 绕过。
 
 > 抓包只用于获取登录态（token/cookie），拿到后可换回官方版 APP 正常使用。
 
