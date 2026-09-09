@@ -11,6 +11,7 @@ app_id / app_secret 是应用级固定值，一般不变（可用 --secret 自�
 """
 import hashlib
 import json
+import sys
 import time
 import uuid
 import os
@@ -25,6 +26,50 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def load_config():
     with open(os.path.join(HERE, "zeeho_data.json"), "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def save_config(cfg):
+    """写回配置文件（原子操作：先写临时文件再替换）"""
+    tmp = os.path.join(HERE, "zeeho_data.json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, os.path.join(HERE, "zeeho_data.json"))
+
+
+def pre_check():
+    """签到前自动检测：app_secret 为空则自动获取，代码有更新则提醒（不自动覆盖）。
+
+    失败不影响签到流程，静默处理。
+    """
+    # 1. 检查 app_secret，为空则自动获取
+    cfg = load_config()
+    if not cfg.get("app_secret"):
+        print("🔑 app_secret 为空，尝试自动获取...")
+        try:
+            sys.path.insert(0, HERE)
+            import zeeho_update
+            app_id, app_secret = zeeho_update.fetch_app_secret()
+            if app_secret and len(app_secret) == 40:
+                cfg["app_secret"] = app_secret
+                if app_id:
+                    cfg["app_id"] = app_id
+                save_config(cfg)
+                print(f"  ✅ app_secret 已自动获取并写入")
+            else:
+                print("  ⚠️ app_secret 获取失败，签到可能返回 30121")
+        except Exception as e:
+            print(f"  ⚠️ app_secret 自动获取异常: {e}")
+
+    # 2. 检测代码更新（仅提醒，不自动覆盖）
+    try:
+        sys.path.insert(0, HERE)
+        import zeeho_update
+        changed, ok = zeeho_update.update_file("zeeho_signin.py", check_only=True, auto=False)
+        if changed:
+            print("🔄 检测到脚本有新版本，运行 `python3 zeeho_update.py` 可升级")
+    except Exception:
+        pass  # 更新检测失败不影响签到
 
 
 def gen_sign(cfg, data=""):
@@ -143,6 +188,9 @@ def notify(content):
 
 
 def main():
+    # 签到前自动检测：app_secret 为空则自动获取，代码有更新则提醒
+    pre_check()
+
     cfg = load_config()
     nick = cfg.get("user_id", "")
 
