@@ -120,9 +120,9 @@ def build_headers(cfg, data=""):
 
 def do_signin(cfg):
     headers = build_headers(cfg, "")
-    # 抓包确认签到接口为 GET
-    return requests.get(f"{BASE}/cfmotoservermine/signin", headers=headers,
-                        timeout=15, proxies=NO_PROXY)
+    # 抓包确认签到接口为 POST（无 body，签名 data 仍为空字符串）
+    return requests.post(f"{BASE}/cfmotoservermine/signin", headers=headers,
+                         timeout=15, proxies=NO_PROXY)
 
 
 def get_signin_info(cfg):
@@ -152,6 +152,35 @@ def is_today_signed(info_data):
         if day.get("createDate") == today:
             return day.get("signStatue") == 3
     return False
+
+
+def today_detail(info_data):
+    """返回今天对应的签到明细 dict（含 signStatue/createDate/integral 等），无则 None"""
+    today = time.strftime("%Y-%m-%d", time.localtime())
+    for day in info_data.get("nowSignDetailVos") or []:
+        if day.get("createDate") == today:
+            return day
+    return None
+
+
+def extract_continue_days(info_data):
+    """从签到信息里尽量提取「连续签到天数」。
+
+    POST /signin 返回的 data 可能不含 continueDays，需从复查的 /signin/info 里取。
+    尝试顺序: info 顶层 → 今日明细 → 回退 None。
+    """
+    # 1. info 顶层（常见字段名）
+    for k in ("continueDays", "continuousDays", "continueCount"):
+        v = info_data.get(k)
+        if v is not None:
+            return v
+    # 2. 今日明细里的字段
+    td = today_detail(info_data) or {}
+    for k in ("continueDays", "continuousDays", "continueCount"):
+        v = td.get(k)
+        if v is not None:
+            return v
+    return None
 
 
 def notify(content):
@@ -203,7 +232,10 @@ def main():
         print(f"⚠️ 签到信息查询失败: {e}")
         info_data = {}
 
-    if is_today_signed(info_data):
+    pre_signed = is_today_signed(info_data)
+    pre_count = info_data.get("signCount", None)
+
+    if pre_signed:
         sign_count = info_data.get("signCount", "?")
         integral = info_data.get("integral", "?")
         line = (f"ℹ️ 今日已签到（{nick}）\n"
@@ -228,9 +260,39 @@ def main():
         data = j.get("data") or {}
 
         if code == "10000":
-            continue_days = data.get("continueDays", "?")
-            line = f"✅ 签到成功（{nick}）\n连续签到 {continue_days} 天"
-            title = "✅ 极核自动签到报告"
+            api_continue = data.get("continueDays")
+            # ⚠️ 关键：复查签到信息，确认今日是否真实生效
+            # （API 可能返回 10000 但实际未签到：接口变更/GET→POST/新增参数等）
+            try:
+                _, post_info = get_signin_info(cfg)
+                post_signed = is_today_signed(post_info)
+                post_count = post_info.get("signCount", None)
+            except Exception as e:
+                print(f"⚠️ 签到后复查失败: {e}")
+                post_signed, post_count = False, None
+
+            if post_signed:
+                count_disp = post_count if post_count is not None else "?"
+                # 连续签到天数：优先用 API 直接返回值，其次从复查信息提取，最后回退本月累计
+                continue_disp = api_continue or extract_continue_days(post_info)
+                if continue_disp is None:
+                    continue_disp = count_disp if count_disp != "?" else "?"
+                line = (f"✅ 签到成功（{nick}）\n"
+                        f"连续签到 {continue_disp} 天\n"
+                        f"本月累计 {count_disp} 天")
+                title = "✅ 极核自动签到报告"
+            else:
+                # 接口声称成功但复查今日仍未签到 → 实际未生效
+                count_delta = ""
+                if pre_count is not None and post_count is not None:
+                    count_delta = f"（签到前 {pre_count} → 签到后 {post_count}）"
+                line = (f"🔴 签到未实际生效（{nick}）\n"
+                        f"接口返回 code=10000 连续 {api_continue} 天，"
+                        f"但复查今日仍未签到{count_delta}\n"
+                        f"→ 签到接口可能已变更（GET→POST / 新增参数 / 路径调整），"
+                        f"请重新抓包确认")
+                title = "🔴 极核自动签到报告"
+                print("接口响应:", r.text[:300])
         elif code == "repeatedly_operation":
             line = "ℹ️ 今日已签到（或操作过快）"
             title = "✅ 极核自动签到报告"
