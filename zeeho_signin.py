@@ -93,7 +93,10 @@ def build_headers(cfg, data=""):
     dev_uuid = dev.get("device_uuid") or str(uuid.uuid4())
     network = dev.get("network", "4g")
     os_name = dev.get("os", "AndroidOS")
-    zeeho_ua = f"MOBILE|{platform}|{os_ver}|ZEEHO_APP|{app_ver}|{brand}|{model}|{resolution}|{dev_uuid}|{network}|{os_name}"
+    # 3.0.5+ 格式（10段）：brand 与 model 合并为一段 "Redmi 24122RKC7C"
+    # MOBILE|Android|17|ZEEHO_APP|3.0.5|Redmi 24122RKC7C|385*854|<uuid>|4g|AndroidOS
+    zeeho_ua = (f"MOBILE|{platform}|{os_ver}|ZEEHO_APP|{app_ver}|"
+                f"{brand} {model}|{resolution}|{dev_uuid}|{network}|{os_name}")
     # Referer 参数名平台相关: iOS 用 time=, Android 用 timeStamp=
     if platform == "Android":
         referer = f"https://h5.zeehoev.com/activity/signin?hideNavigationBar=true&timeStamp={int(time.time() * 1000)}"
@@ -152,6 +155,31 @@ def is_today_signed(info_data):
         if day.get("createDate") == today:
             return day.get("signStatue") == 3
     return False
+
+
+def check_login(cfg):
+    """用普通接口 baseInfo 验证登录态是否有效（不受签到接口 30125 影响）。
+
+    返回 True=登录态有效，False=已失效。
+    """
+    try:
+        headers = build_headers(cfg, "")
+        r = requests.get(f"{BASE}/cfmotoservermine/H5/baseInfo",
+                         headers=headers, timeout=12, proxies=NO_PROXY)
+        return r.json().get("code") == "10000"
+    except Exception:
+        return False
+
+
+def diagnose_30125(cfg):
+    """30125 permit error 分流诊断：区分登录态失效 vs 今日已签到/服务端风控"""
+    if check_login(cfg):
+        print("   → 登录态正常，30125 为签到接口授权拒绝")
+        print("     （10月改版后：今日已签到状态查询签到接口也会返回 30125）")
+        print("     若今日确实已签到属正常；若未签到则为服务端风控")
+        return "signed_or_risk"
+    print("   → 登录态已失效，请重新抓包更新 authorization / cookie / user_id")
+    return "login_expired"
 
 
 def today_detail(info_data):
@@ -226,8 +254,24 @@ def main():
     # 1. 先查签到信息，判断今天是否已签
     try:
         info_resp, info_data = get_signin_info(cfg)
-        if info_resp.json().get("code") != "10000":
+        info_code = info_resp.json().get("code")
+        if info_code != "10000":
             print(f"⚠️ 签到信息查询异常: {info_resp.text[:200]}")
+            if str(info_code) == "30125":
+                # 10月改版：已签状态/风控时签到接口返回 30125，先用 baseInfo 验证登录态
+                if diagnose_30125(cfg) == "login_expired":
+                    notify("🔴 极核自动签到报告\n\n登录态已失效，请重新抓包更新 "
+                           "zeeho_data.json 里的 authorization / cookie / user_id")
+                    return
+                # 登录态正常但签到接口拒绝 → 无法确认状态，跳过签到直接提示
+                line = (f"ℹ️ 今日状态无法确认（{nick}）\n"
+                        f"签到接口返回 30125，但登录态正常\n"
+                        f"若今日已签到属正常（10月改版后已签状态也返回 30125）；"
+                        f"若未签到则为服务端风控")
+                title = "ℹ️ 极核自动签到报告"
+                print(line)
+                notify(f"{title}\n\n{line}")
+                return
     except Exception as e:
         print(f"⚠️ 签到信息查询失败: {e}")
         info_data = {}
@@ -301,10 +345,9 @@ def main():
             title = "🔴 极核自动签到报告"
             print("响应:", r.text[:300])
             line += f"\n响应: {r.text[:200]}"
-            # permit error / token 失效 → 登录态过期，需重新抓包
-            if code in ("30121",) or "permit" in str(msg).lower():
-                print("   → 登录态已过期，请重新抓包更新 zeeho_data.json "
-                      "里的 authorization / cookie / user_id")
+            # permit error → 先用 baseInfo 分流：登录态失效 vs 已签/风控
+            if str(code) in ("30121", "30125") or "permit" in str(msg).lower():
+                diagnose_30125(cfg)
         print(line)
         notify(f"{title}\n\n{line}")
     except Exception as e:
