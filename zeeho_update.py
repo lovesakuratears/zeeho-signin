@@ -293,22 +293,34 @@ def fetch_app_secret():
         return None, None
 
     # 从资源中提取应用配置
-    m2 = re.search(
-        r'VUE_APP_PRODUCTION_CONFIG":\{"appId":"([^"]+)","appSecret":"([^"]+)"',
-        rj.text)
-    if not m2:
-        print("  ⚠️ 未找到应用配置项")
-        return None, None
-
+    # 旧格式: "appId":"<二进制块>" / "appSecret":"<二进制块>"，块以空格分隔
+    # 新格式: \x22i1\x22:\x22<二进制块>\x22，块以字面量 \x20 分隔
     def decode_cfg(s):
-        """解码配置字符串"""
-        return ''.join(chr(int(tok[:8], 2)) for tok in s.split())
+        """解码配置字符串：二进制块（每块前8位）转字符，兼容 \\x20 / 空格分隔"""
+        toks = s.split(r'\x20') if r'\x20' in s else s.split()
+        return ''.join(chr(int(tok[:8], 2)) for tok in toks)
 
-    app_id = decode_cfg(m2.group(1))
-    app_secret = decode_cfg(m2.group(2))
+    # 尝试新格式（i1/s1）
+    # 注意值内含字面量 \x20 分隔符，故不能用 [^\\] 字符类，用非贪婪匹配到 \x22 为止
+    m_new = re.search(
+        r'VUE_APP_PRODUCTION_CONFIG\\x22:\{\\x22i1\\x22:\\x22(.+?)\\x22,\\x22s1\\x22:\\x22(.+?)\\x22',
+        rj.text)
+    if m_new:
+        app_id = decode_cfg(m_new.group(1))
+        app_secret = decode_cfg(m_new.group(2))
+    else:
+        # 尝试旧格式（appId/appSecret）
+        m_old = re.search(
+            r'VUE_APP_PRODUCTION_CONFIG":\{"appId":"([^"]+)","appSecret":"([^"]+)"',
+            rj.text)
+        if not m_old:
+            print("  ⚠️ 未找到应用配置项（新旧格式均不匹配）")
+            return None, None
+        app_id = decode_cfg(m_old.group(1))
+        app_secret = decode_cfg(m_old.group(2))
 
     if len(app_secret) != 40:
-        print(f"  ⚠️ 解析结果异常，可能格式有变")
+        print(f"  ⚠️ 解析结果异常，可能格式有变 (len={len(app_secret)})")
         return None, None
 
     return app_id, app_secret
