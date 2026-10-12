@@ -36,14 +36,18 @@ NO_PROXY = {"http": None, "https": None}  # 强制直连，避免代理干扰
 
 
 def build_mirrors(filename):
-    """生成多个镜像的 raw 文件下载地址，按顺序尝试"""
+    """生成多个镜像的 raw 文件下载地址，按顺序尝试。
+
+    顺序原则：无缓存的实时源优先，jsDelivr 有 CDN 缓存（@main 可能滞后数小时）只能兜底，
+    否则会拿到旧文件误判"已是最新"。
+    """
     raw = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{filename}"
     return [
         raw,                                                    # 官方
-        f"https://cdn.jsdelivr.net/gh/{REPO}@{BRANCH}/{filename}",  # jsDelivr CDN
-        f"https://gh-proxy.com/{raw}",                          # gh-proxy 镜像
+        f"https://gh-proxy.com/{raw}",                          # gh-proxy 镜像（实时）
         f"https://mirror.ghproxy.com/{raw}",                    # ghproxy 镜像
         f"https://ghps.cc/{raw}",                               # ghps 镜像
+        f"https://cdn.jsdelivr.net/gh/{REPO}@{BRANCH}/{filename}",  # jsDelivr CDN（有缓存，兜底）
     ]
 
 
