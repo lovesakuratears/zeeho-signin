@@ -38,28 +38,33 @@ def save_config(cfg):
 
 
 def pre_check():
-    """签到前自动检测：app_secret 为空则自动获取，代码有更新则提醒（不自动覆盖）。
+    """签到前自动检测：app_secret/app_id 与线上不一致则自动更新，代码有更新则提醒。
 
+    注意：不能只在 secret 为空时才获取——APP 升级后旧的 app_id/app_secret 会失效，
+    签到接口返回 30125 permit error（而 baseInfo 仍正常，容易误判为风控/已签到）。
     失败不影响签到流程，静默处理。
     """
-    # 1. 检查 app_secret，为空则自动获取
+    # 1. 检查 app_secret/app_id，与线上不一致则更新
     cfg = load_config()
-    if not cfg.get("app_secret"):
-        print("🔑 app_secret 为空，尝试自动获取...")
-        try:
-            sys.path.insert(0, HERE)
-            import zeeho_update
-            app_id, app_secret = zeeho_update.fetch_app_secret()
-            if app_secret and len(app_secret) == 40:
+    try:
+        sys.path.insert(0, HERE)
+        import zeeho_update
+        app_id, app_secret = zeeho_update.fetch_app_secret()
+        if app_secret and len(app_secret) == 40:
+            if cfg.get("app_secret") != app_secret or cfg.get("app_id") != app_id:
+                old_id = cfg.get("app_id") or "(空)"
+                old_sec = (cfg.get("app_secret") or "")[:8] or "(空)"
+                print(f"🔑 检测到 app_id/app_secret 已更新")
+                print(f"   旧: {old_id} / {old_sec}…")
+                print(f"   新: {app_id} / {app_secret[:8]}…")
                 cfg["app_secret"] = app_secret
-                if app_id:
-                    cfg["app_id"] = app_id
+                cfg["app_id"] = app_id
                 save_config(cfg)
-                print(f"  ✅ app_secret 已自动获取并写入")
-            else:
-                print("  ⚠️ app_secret 获取失败，签到可能返回 30121")
-        except Exception as e:
-            print(f"  ⚠️ app_secret 自动获取异常: {e}")
+                print("  ✅ 已自动更新")
+        elif not cfg.get("app_secret"):
+            print("  ⚠️ app_secret 为空且自动获取失败，签到可能返回 30121")
+    except Exception as e:
+        print(f"  ⚠️ app_secret 自动检测异常: {e}")
 
     # 2. 检测代码更新（仅提醒，不自动覆盖）
     try:
