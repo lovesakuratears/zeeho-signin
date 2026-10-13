@@ -123,29 +123,49 @@ def build_headers(cfg, data=""):
 
 def do_signin(cfg):
     headers = build_headers(cfg, "")
-    # 抓包确认签到接口为 POST（无 body，签名 data 仍为空字符串）
-    return requests.post(f"{BASE}/cfmotoservermine/signin", headers=headers,
+    # 10月改版：签到接口加了 /H5/ 前缀（抓包确认），旧路径 /cfmotoservermine/signin 返回 30125
+    # POST 无 body，签名 data 仍为空字符串
+    return requests.post(f"{BASE}/cfmotoservermine/H5/signin", headers=headers,
                          timeout=15, proxies=NO_PROXY)
 
 
 def get_signin_info(cfg):
-    """查询当月签到信息（GET /signin/info?month=YYYY-M）。
+    """查询当月签到信息（GET /H5/signin/info?month=YYYY-MM）。
 
     返回 (response, info_data)；info_data 中 nowSignDetailVos 含每日签到状态，
     signStatue: 2=未签到, 3=已签到。
     注意：month 需参与签名计算。
+    10月改版：路径加了 /H5/ 前缀，旧路径会返回 30125 permit error。
     """
     now = time.localtime()
-    month = f"{now.tm_year}-{now.tm_mon}"
+    month = f"{now.tm_year}-{now.tm_mon:02d}"
     data = f"month={month}"
     headers = build_headers(cfg, data)
-    r = requests.get(f"{BASE}/cfmotoservermine/signin/info?{data}",
+    r = requests.get(f"{BASE}/cfmotoservermine/H5/signin/info?{data}",
                      headers=headers, timeout=15, proxies=NO_PROXY)
     try:
         data_resp = r.json().get("data") or {}
     except Exception:
         data_resp = {}
     return r, data_resp
+
+
+def get_sign_status(cfg):
+    """查询签到状态接口（GET /H5/signin）。
+
+    10月改版新增的轻量状态接口，无需参数，直接返回：
+    lastTime(最后签到时间)、days、continueDays、scoreList。
+    用作 signin/info 被拒时的备用状态判断。返回 (code, data)。
+    """
+    headers = build_headers(cfg, "")
+    try:
+        r = requests.get(f"{BASE}/cfmotoservermine/H5/signin", headers=headers,
+                         timeout=15, proxies=NO_PROXY)
+        j = r.json()
+        return str(j.get("code")), (j.get("data") or {})
+    except Exception as e:
+        print(f"⚠️ 签到状态接口异常: {e}")
+        return "error", {}
 
 
 def is_today_signed(info_data):
@@ -188,6 +208,15 @@ def query_today_status(cfg):
         r, d = get_signin_info(cfg)
         if str(r.json().get("code")) == "10000":
             return "signed" if is_today_signed(d) else "unsigned"
+    except Exception:
+        pass
+    # 备用：状态接口 GET /H5/signin，用 lastTime 判断（10月改版新增）
+    try:
+        code, sd = get_sign_status(cfg)
+        if code == "10000" and sd.get("lastTime"):
+            last_day = str(sd["lastTime"])[:10]
+            today = time.strftime("%Y-%m-%d", time.localtime())
+            return "signed" if last_day == today else "unsigned"
     except Exception:
         pass
     return "unknown"
