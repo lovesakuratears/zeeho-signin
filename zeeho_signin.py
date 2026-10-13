@@ -182,6 +182,17 @@ def diagnose_30125(cfg):
     return "login_expired"
 
 
+def query_today_status(cfg):
+    """再查一次签到信息判断今日状态，返回 'signed' / 'unsigned' / 'unknown'"""
+    try:
+        r, d = get_signin_info(cfg)
+        if str(r.json().get("code")) == "10000":
+            return "signed" if is_today_signed(d) else "unsigned"
+    except Exception:
+        pass
+    return "unknown"
+
+
 def today_detail(info_data):
     """返回今天对应的签到明细 dict（含 signStatue/createDate/integral 等），无则 None"""
     today = time.strftime("%Y-%m-%d", time.localtime())
@@ -258,20 +269,15 @@ def main():
         if info_code != "10000":
             print(f"⚠️ 签到信息查询异常: {info_resp.text[:200]}")
             if str(info_code) == "30125":
-                # 10月改版：已签状态/风控时签到接口返回 30125，先用 baseInfo 验证登录态
+                # 10月改版：已签状态/风控时签到信息接口返回 30125，先用 baseInfo 验证登录态
                 if diagnose_30125(cfg) == "login_expired":
                     notify("🔴 极核自动签到报告\n\n登录态已失效，请重新抓包更新 "
                            "zeeho_data.json 里的 authorization / cookie / user_id")
                     return
-                # 登录态正常但签到接口拒绝 → 无法确认状态，跳过签到直接提示
-                line = (f"ℹ️ 今日状态无法确认（{nick}）\n"
-                        f"签到接口返回 30125，但登录态正常\n"
-                        f"若今日已签到属正常（10月改版后已签状态也返回 30125）；"
-                        f"若未签到则为服务端风控")
-                title = "ℹ️ 极核自动签到报告"
-                print(line)
-                notify(f"{title}\n\n{line}")
-                return
+                # 登录态正常但信息接口拒绝 → 状态未知，仍尝试签到
+                # （否则实际未签到的那天会被整轮直接跳过）
+                print("   → 签到状态无法确认，继续尝试签到")
+                info_data = {}
     except Exception as e:
         print(f"⚠️ 签到信息查询失败: {e}")
         info_data = {}
@@ -308,12 +314,13 @@ def main():
             # ⚠️ 关键：复查签到信息，确认今日是否真实生效
             # （API 可能返回 10000 但实际未签到：接口变更/GET→POST/新增参数等）
             try:
-                _, post_info = get_signin_info(cfg)
+                post_resp, post_info = get_signin_info(cfg)
                 post_signed = is_today_signed(post_info)
                 post_count = post_info.get("signCount", None)
+                post_code = post_resp.json().get("code")
             except Exception as e:
                 print(f"⚠️ 签到后复查失败: {e}")
-                post_signed, post_count = False, None
+                post_signed, post_count, post_code = False, None, None
 
             if post_signed:
                 count_disp = post_count if post_count is not None else "?"
@@ -324,6 +331,12 @@ def main():
                 line = (f"✅ 签到成功（{nick}）\n"
                         f"连续签到 {continue_disp} 天\n"
                         f"本月累计 {count_disp} 天")
+                title = "✅ 极核自动签到报告"
+            elif str(post_code) == "30125":
+                # 复查接口本身被拒（已签状态也会 30125）→ 签到接口已返回成功，采信成功
+                line = (f"✅ 签到接口返回成功（{nick}）\n"
+                        f"连续签到 {api_continue or '?'} 天\n"
+                        f"（状态复查接口返回 30125 无法二次确认，已按成功处理）")
                 title = "✅ 极核自动签到报告"
             else:
                 # 接口声称成功但复查今日仍未签到 → 实际未生效
@@ -347,7 +360,23 @@ def main():
             line += f"\n响应: {r.text[:200]}"
             # permit error → 先用 baseInfo 分流：登录态失效 vs 已签/风控
             if str(code) in ("30121", "30125") or "permit" in str(msg).lower():
-                diagnose_30125(cfg)
+                if diagnose_30125(cfg) == "login_expired":
+                    line = ("🔴 极核签到报告\n\n登录态已失效，请重新抓包更新 "
+                            "zeeho_data.json 里的 authorization / cookie / user_id")
+                else:
+                    # 登录态正常 → 再查一次状态，尽量给出确定结论
+                    st = query_today_status(cfg)
+                    if st == "signed":
+                        line = f"ℹ️ 今日已签到（{nick}），无需重复签到"
+                        title = "✅ 极核自动签到报告"
+                    elif st == "unsigned":
+                        line = (f"🔴 签到失败（{nick}）：接口返回 {code}，"
+                                f"且复查确认今日仍未签到 → 服务端风控拦截")
+                        title = "🔴 极核自动签到报告"
+                    else:
+                        line = (f"⚠️ 签到未确认（{nick}）：接口返回 {code}，"
+                                f"登录态正常但状态查询也被拒绝，无法判断是否已签到\n"
+                                f"若 app 显示未签到则为服务端风控，请稍后手动在 app 签到")
         print(line)
         notify(f"{title}\n\n{line}")
     except Exception as e:
